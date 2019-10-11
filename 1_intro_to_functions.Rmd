@@ -1,8 +1,10 @@
 ---
 title: "Working with USGS Data and Functions"
-author: "Matthew Ross"
-date: "10/7/2019"
+author: "Juli Scamardo"
+date: "`r Sys.Date()`"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
@@ -11,6 +13,7 @@ library(dataRetrieval)
 library(dygraphs) #Time series plotting
 library(tidyr) 
 library(xts) #Time series objects
+library(ggthemes)
 
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -20,7 +23,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Download USGS data using dataRetrieval
 
 
-### Non function oriented method
+#### Non function oriented method
 
 ```{r,eval=F}
 lincoln_q <- readNWISdv('06752260', parameterCd = '00060',
@@ -44,7 +47,7 @@ summary(combo_data)
 ```
 
 
-### Function oriented method
+#### Function oriented method
 
 
 ```{r}
@@ -75,7 +78,7 @@ summary(combo_data)
 
 ## Plot the discharge data
 
-### Time series (xaxis = date)
+#### Time series (xaxis = date)
 
 ```{r}
 
@@ -85,7 +88,7 @@ ggplot(combo_data,aes(x=Date,y=q_cfs,color=site)) +
 
 ```
 
-### Density plot 
+#### Density plot 
 
 ```{r}
 ggplot(combo_data,aes(x=q_cfs,color=site)) +
@@ -95,7 +98,7 @@ ggplot(combo_data,aes(x=q_cfs,color=site)) +
 ```
 
 
-### Interactive graphs 
+#### Interactive graphs 
 
 ```{r,eval=F}
 #Structore examination
@@ -112,7 +115,7 @@ dygraph(wide_xts)
 ```
 
 
-### Function for interactive graph
+#### Function for interactive graph
 
 ```{r}
 
@@ -153,44 +156,92 @@ plot). Please plot the `combo_data` dataset here.
 
 
 ```{r}
+## Create function that plots time series in ggplot2
+plot_ts <- function(df){
+  p <- ggplot(data = df, aes(x = Date, y = q_cfs, color = site))+ 
+    geom_line() + 
+    theme_few() + 
+    scale_color_economist() + 
+    labs(x = 'Date', y = 'Discharge (cfs)') + 
+    theme(legend.position = c(0.1, 0.85))
+  
+  return(p)
+}
+
+## plot combo data using function above
+plot_ts(combo_data)
 
 ```
 
 
 ## Download discharge data
+Here, I downloaded data for the Rio Grande River through Big Bend National Park. I'm looking at 2 USGS gages: one upstream at Castolon and one downstream at Rio Grande Village. These two gages bracket streamflow through Big Bend. 
 
-Here I want you to download data from any 2 other USGS site in the world using the `q_downloader` function we already wrote. If this 
-function works, great! If not, you will need to investigate why? 
-Even if your function call works, why is my function "brittle?"
-
-Hint: hardcoding `q_cfs = X_00060_00003` could be dangerous
+The 'q_downloader' function worked for this download, but __'q_downloader' could be brittle because certain variable names and values are hard coded. Some sites many not follow this naming scheme.__
 
 ```{r}
+## Downloading data for Rio Grande near Castolon Visitors Center
+castolon <- q_downloader(site_no = '08374550', 
+                         site_id = 'castolon')
+
+## Downloading data for Rio Grande near Rio Grande Village
+rgvillage <- q_downloader(site_no = '08375300', 
+                          site_id = 'rgvillage')
 
 ```
 
 
 ## Joining your two datasets
-
-Above, I combined datasets by stacking them on top of each other 
-(bind_rows), but then we had to `spread` the data anyways because
-`xts` and `dygraphs` prefer wide datasets. Here I want you 
-to write a function that joins your two USGS datasets by calling one of the family of `dplyr::join`. 
-
-Hint: be careful of having two `site` columns. 
+My goal was to join the two datasets in a way that results in a wide dataset that can be converted to a time series and interactive graph. 
 
 ```{r}
+## function for joining discharge datasets resulting in a wide dataset
+q_join <- function(df1, df2) {
+  
+  # gather site name of both sites
+  name1<- sym(df1$site[nrow(df1)])
+  name2<- sym(df2$site[nrow(df2)])
+  
+  # join datasets and rename columns
+  q <- full_join(df1, df2, by = 'Date') %>%
+    select(agency_cd.x, site_no.x, site_no.y, Date, q_cfs.x, q_cfs.y) %>%
+    rename(agency_cd = 1, site_no_1 = 2, site_no_2 = 3, date = 4, 
+           !!name1 := 5, !!name2 :=6)
 
+return(q)
+}
+
+## Creating a wide dataset for streamflow through Big Bend NP
+bbnp <- q_join(df1 = castolon, df2 = rgvillage)
+
+## Looking at the top of the dataset to see if it joined correctly
+head(bbnp)
 ```
 
 
 ## Plotting the data
-
-My function above `xts_maker` merely preps the data for plotting 
-a dygraph. Here, I want you to make a similar function that preps *and* plots a dygraph of your joined data. 
+The dataset created above can then be plotted as an interactive graph using dygraphs. Here, I created a function that formats the data into a time series and then plots it. 
 
 
 ```{r}
+## Function for formatting and plotting discharge time series
+dy_builder <- function(df, title){
+  # slim down df
+  w <- df %>%
+    select(-agency_cd,-contains("site_no")) 
+  
+  # create time series
+  w_xts <- xts(w %>% select(-date), order.by = w$date)
+  
+  # plot on interactive map
+  g <- dygraph(w_xts, main = title, ylab = 'discharge (cfs)') %>%
+    dyOptions(colors = colorspace::diverge_hcl(2))
+  
+  return(g)
+}
+
+## Plot the bbnp data using the function
+dy_builder(bbnp, 'Rio Grande Streamflow: Big Bend NP')
 
 ```
 
